@@ -1,21 +1,35 @@
 import logging
 from collections.abc import Callable
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.exceptions import HTTPException
 
-from raizes.api.contratos import CadastroUsuario, Credenciais, RespostaErro, RespostaToken
-from raizes.application.servicos import Contas
-from raizes.domain.modelos import Ator, ErroNegocio
+from raizes.api.contratos import (
+    AlteracaoStatus,
+    CadastroProduto,
+    CadastroUnidade,
+    CadastroUsuario,
+    Credenciais,
+    CriacaoPedido,
+    MovimentacaoEstoque,
+    Pagina,
+    RespostaErro,
+    RespostaPagamento,
+    RespostaPedido,
+    RespostaToken,
+    SolicitacaoPagamento,
+)
+from raizes.application.servicos import Catalogo, Contas, GestaoPedidos
+from raizes.domain.modelos import Ator, CanalPedido, ErroNegocio, StatusPedido
 
 registrador = logging.getLogger("raizes")
 
 
-def criar_api(contas: Contas) -> FastAPI:
+def criar_api(contas: Contas, catalogo: Catalogo, gestao_pedidos: GestaoPedidos) -> FastAPI:
     erros = {
         codigo: {"model": RespostaErro, "description": descricao}
         for codigo, descricao in {
@@ -114,5 +128,145 @@ def criar_api(contas: Contas) -> FastAPI:
     @api.get("/usuarios/eu", tags=["Usuarios"], summary="Consultar dados do proprio usuario")
     def consultar_perfil(ator: Ator = Depends(ator_autenticado)):
         return contas.consultar_perfil(ator)
+
+    @api.get(
+        "/unidades", response_model=Pagina, tags=["Unidades"], summary="Listar unidades ativas"
+    )
+    def listar_unidades(pagina: int = Query(1, ge=1), limite: int = Query(10, ge=1, le=100)):
+        return catalogo.listar_unidades(pagina, limite)
+
+    @api.post(
+        "/unidades",
+        status_code=201,
+        tags=["Unidades"],
+        summary="Cadastrar unidade como administrador",
+    )
+    def cadastrar_unidade(corpo: CadastroUnidade, ator: Ator = Depends(ator_autenticado)):
+        return catalogo.cadastrar_unidade(ator, corpo.nome, corpo.regiao)
+
+    @api.get(
+        "/produtos", response_model=Pagina, tags=["Produtos"], summary="Listar produtos ativos"
+    )
+    def listar_produtos(pagina: int = Query(1, ge=1), limite: int = Query(10, ge=1, le=100)):
+        return catalogo.listar_produtos(pagina, limite)
+
+    @api.post(
+        "/produtos",
+        status_code=201,
+        tags=["Produtos"],
+        summary="Cadastrar produto como administrador",
+    )
+    def cadastrar_produto(corpo: CadastroProduto, ator: Ator = Depends(ator_autenticado)):
+        return catalogo.cadastrar_produto(ator, corpo.nome, corpo.precoCentavos)
+
+    @api.get(
+        "/unidades/{unidade_id}/cardapio",
+        response_model=Pagina,
+        tags=["Produtos"],
+        summary="Consultar cardapio e disponibilidade da unidade",
+    )
+    def cardapio(
+        unidade_id: UUID, pagina: int = Query(1, ge=1), limite: int = Query(10, ge=1, le=100)
+    ):
+        return catalogo.cardapio(str(unidade_id), pagina, limite)
+
+    @api.get(
+        "/estoques/{unidade_id}",
+        response_model=Pagina,
+        tags=["Estoques"],
+        summary="Consultar estoque como gerente da unidade ou administrador",
+    )
+    def consultar_estoque(
+        unidade_id: UUID,
+        pagina: int = Query(1, ge=1),
+        limite: int = Query(10, ge=1, le=100),
+        ator: Ator = Depends(ator_autenticado),
+    ):
+        return catalogo.consultar_estoque(ator, str(unidade_id), pagina, limite)
+
+    @api.post(
+        "/estoques/movimentacoes",
+        status_code=201,
+        tags=["Estoques"],
+        summary="Movimentar estoque como gerente da unidade ou administrador",
+    )
+    def movimentar_estoque(corpo: MovimentacaoEstoque, ator: Ator = Depends(ator_autenticado)):
+        return catalogo.movimentar_estoque(
+            ator, str(corpo.unidadeId), str(corpo.produtoId), corpo.quantidade, corpo.motivo
+        )
+
+
+    @api.post(
+        "/pedidos",
+        status_code=201,
+        response_model=RespostaPedido,
+        tags=["Pedidos"],
+        summary="Criar pedido com reserva de estoque",
+        description="CLIENTE: pedidos proprios. ATENDENTE: unidade vinculada. ADMIN: qualquer unidade. Idempotency-Key obrigatoria; repetir a mesma chave e conteudo devolve o mesmo pedido.",
+    )
+    def criar_pedido(
+        corpo: CriacaoPedido,
+        chave_idempotencia: str = Header(alias="Idempotency-Key", min_length=8, max_length=100),
+        ator: Ator = Depends(ator_autenticado),
+    ):
+        itens = [
+            {"produtoId": str(item.produtoId), "quantidade": item.quantidade}
+            for item in corpo.itens
+        ]
+        return gestao_pedidos.criar(
+            ator,
+            str(corpo.unidadeId),
+            corpo.canalPedido,
+            itens,
+            chave_idempotencia,
+        )
+
+    @api.get(
+        "/pedidos",
+        response_model=Pagina,
+        tags=["Pedidos"],
+        summary="Listar pedidos com isolamento por cliente ou unidade",
+    )
+    def listar_pedidos(
+        pagina: int = Query(1, ge=1),
+        limite: int = Query(10, ge=1, le=100),
+        canalPedido: CanalPedido | None = None,
+        status: StatusPedido | None = None,
+        ator: Ator = Depends(ator_autenticado),
+    ):
+        return gestao_pedidos.listar(ator, pagina, limite, canalPedido, status)
+
+    @api.get(
+        "/pedidos/{pedido_id}",
+        response_model=RespostaPedido,
+        tags=["Pedidos"],
+        summary="Consultar pedido proprio ou da unidade",
+    )
+    def consultar_pedido(pedido_id: UUID, ator: Ator = Depends(ator_autenticado)):
+        return gestao_pedidos.obter(ator, str(pedido_id))
+
+    @api.patch(
+        "/pedidos/{pedido_id}/status",
+        response_model=RespostaPedido,
+        tags=["Pedidos"],
+        summary="Atualizar status respeitando o fluxo operacional",
+        description="PRONTO: cozinha, gerente ou admin. ENTREGUE: atendente, gerente ou admin. CANCELADO: cliente antes do pagamento; atendente, gerente ou admin antes de pronto. Funcionarios restritos a unidade vinculada.",
+    )
+    def atualizar_status(
+        pedido_id: UUID, corpo: AlteracaoStatus, ator: Ator = Depends(ator_autenticado)
+    ):
+        return gestao_pedidos.alterar_status(ator, str(pedido_id), corpo.status)
+
+    @api.post(
+        "/pagamentos",
+        status_code=201,
+        response_model=RespostaPagamento,
+        tags=["Pagamentos"],
+        summary="Solicitar e registrar pagamento mock",
+        description="CLIENTE proprietario, ATENDENTE da unidade ou ADMIN. APROVADO inicia preparo; RECUSADO cancela e devolve estoque; TEMPO_ESGOTADO retorna 503 sem finalizar. Repeticao do mesmo resultado nao duplica pagamento.",
+    )
+    def pagar(corpo: SolicitacaoPagamento, ator: Ator = Depends(ator_autenticado)):
+        return gestao_pedidos.pagar(ator, str(corpo.pedidoId), corpo.resultado)
+
 
     return api

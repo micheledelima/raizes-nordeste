@@ -1,7 +1,16 @@
+import hashlib
+import json
+from collections import Counter
 from datetime import UTC, datetime
 
-from raizes.application.portas import Seguranca, UnidadeTrabalho, exigir_registro
-from raizes.domain.modelos import Ator, ErroNegocio, Perfil
+from raizes.application.portas import (
+    Seguranca,
+    ServicoPagamento,
+    UnidadeTrabalho,
+    exigir_registro,
+    paginar,
+)
+from raizes.domain.modelos import Ator, ErroNegocio, Pedido, Perfil, StatusPedido
 
 
 def agora() -> str:
@@ -85,3 +94,285 @@ class Contas:
                 "perfil": usuario["perfil"],
                 "consentimentoFidelidade": bool(usuario["consentimento"]),
             }
+
+class Catalogo:
+    def __init__(self, unidade_trabalho: UnidadeTrabalho):
+        self.unidade_trabalho = unidade_trabalho
+
+    def listar_unidades(self, pagina, limite):
+        with self.unidade_trabalho() as repositorio:
+            return paginar(repositorio, "unidades", pagina, limite, ativo=1)
+
+    def cadastrar_unidade(self, ator, nome, regiao):
+        ator.exigir(Perfil.ADMIN)
+        with self.unidade_trabalho() as repositorio:
+            unidade = repositorio.adicionar("unidades", nome=nome, regiao=regiao)
+            auditar(repositorio, ator, "UNIDADE_CRIADA", unidade["id"])
+            return unidade
+
+    def cadastrar_produto(self, ator, nome, preco_centavos):
+        ator.exigir(Perfil.ADMIN)
+        with self.unidade_trabalho() as repositorio:
+            produto = repositorio.adicionar("produtos", nome=nome, preco_centavos=preco_centavos)
+            auditar(repositorio, ator, "PRODUTO_CRIADO", produto["id"])
+            return produto
+
+    def listar_produtos(self, pagina, limite):
+        with self.unidade_trabalho() as repositorio:
+            return paginar(repositorio, "produtos", pagina, limite, ativo=1)
+
+    def cardapio(self, unidade_id, pagina, limite):
+        with self.unidade_trabalho() as repositorio:
+            exigir_registro(repositorio, "unidades", id=unidade_id, ativo=1)
+            resultado = paginar(
+                repositorio, "estoques", pagina, limite, unidade_id=unidade_id, disponivel=1
+            )
+            resultado["itens"] = [
+                {
+                    **entrada,
+                    "produto": exigir_registro(repositorio, "produtos", id=entrada["produto_id"]),
+                }
+                for entrada in resultado["itens"]
+            ]
+            return resultado
+
+    def movimentar_estoque(self, ator, unidade_id, produto_id, variacao, motivo):
+        ator.exigir(Perfil.ADMIN, Perfil.GERENTE)
+        ator.verificar_unidade(unidade_id)
+        with self.unidade_trabalho() as repositorio:
+            exigir_registro(repositorio, "unidades", id=unidade_id, ativo=1)
+            exigir_registro(repositorio, "produtos", id=produto_id, ativo=1)
+            if not repositorio.obter("estoques", unidade_id=unidade_id, produto_id=produto_id):
+                repositorio.adicionar("estoques", unidade_id=unidade_id, produto_id=produto_id)
+            repositorio.ajustar_estoque(unidade_id, produto_id, variacao)
+            repositorio.adicionar(
+                "movimentacoes_estoque",
+                unidade_id=unidade_id,
+                produto_id=produto_id,
+                variacao=variacao,
+                motivo=motivo,
+                ator_id=ator.id,
+                criado_em=agora(),
+            )
+            auditar(repositorio, ator, "ESTOQUE_MOVIMENTADO", produto_id)
+            return exigir_registro(
+                repositorio, "estoques", unidade_id=unidade_id, produto_id=produto_id
+            )
+
+    def consultar_estoque(self, ator, unidade_id, pagina, limite):
+        ator.exigir(Perfil.ADMIN, Perfil.GERENTE)
+        ator.verificar_unidade(unidade_id)
+        with self.unidade_trabalho() as repositorio:
+            exigir_registro(repositorio, "unidades", id=unidade_id)
+            return paginar(repositorio, "estoques", pagina, limite, unidade_id=unidade_id)
+
+
+class GestaoPedidos:
+    def __init__(self, unidade_trabalho: UnidadeTrabalho, servico_pagamento: ServicoPagamento):
+        self.unidade_trabalho = unidade_trabalho
+        self.servico_pagamento = servico_pagamento
+
+    def exigir_acesso(self, repositorio, ator, pedido_id):
+        pedido = exigir_registro(repositorio, "pedidos", id=pedido_id)
+        if ator.perfil == Perfil.CLIENTE:
+            if pedido["usuario_id"] != ator.id:
+                raise ErroNegocio("SEM_PERMISSAO", "Pedido de outro cliente.", 403)
+        else:
+            ator.verificar_unidade(pedido["unidade_id"])
+        return pedido
+
+    def serializar(self, repositorio, pedido):
+        return {
+            "id": pedido["id"],
+            "clienteId": pedido["usuario_id"],
+            "unidadeId": pedido["unidade_id"],
+            "canalPedido": pedido["canal"],
+            "status": pedido["status"],
+            "totalCentavos": pedido["total_centavos"],
+            "descontoCentavos": pedido["desconto_centavos"],
+            "criadoEm": pedido["criado_em"],
+            "itens": repositorio.listar("itens_pedido", pedido_id=pedido["id"]),
+        }
+
+    def criar(self, ator, unidade_id, canal, itens, chave):
+        ator.exigir(Perfil.CLIENTE, Perfil.ATENDENTE, Perfil.ADMIN)
+        if ator.perfil != Perfil.CLIENTE:
+            ator.verificar_unidade(unidade_id)
+        quantidades = Counter()
+        for item in itens:
+            quantidades[item["produtoId"]] += item["quantidade"]
+        conteudo_canonico = {
+            "unit": unidade_id,
+            "canal": canal,
+            "itens": sorted(quantidades.items()),
+        }
+        resumo = hashlib.sha256(json.dumps(conteudo_canonico, sort_keys=True).encode()).hexdigest()
+        with self.unidade_trabalho() as repositorio:
+            existente = repositorio.obter("pedidos", usuario_id=ator.id, chave_idempotencia=chave)
+            if existente:
+                if existente["resumo_requisicao"] != resumo:
+                    raise ErroNegocio(
+                        "IDEMPOTENCIA_CONFLITANTE", "Chave ja utilizada com outro conteudo."
+                    )
+                return self.serializar(repositorio, existente)
+            exigir_registro(repositorio, "unidades", id=unidade_id, ativo=1)
+            precos = {}
+            for produto_id, quantidade in quantidades.items():
+                produto = exigir_registro(repositorio, "produtos", id=produto_id, ativo=1)
+                entrada = repositorio.obter(
+                    "estoques", unidade_id=unidade_id, produto_id=produto_id, disponivel=1
+                )
+                if not entrada or entrada["quantidade"] < quantidade:
+                    raise ErroNegocio(
+                        "ESTOQUE_INSUFICIENTE",
+                        "Produto indisponivel ou estoque insuficiente na unidade.",
+                    )
+                precos[produto_id] = produto["preco_centavos"]
+            subtotal = sum(
+                (precos[produto_id] * quantidade for produto_id, quantidade in quantidades.items())
+            )
+            pedido = repositorio.adicionar(
+                "pedidos",
+                usuario_id=ator.id,
+                unidade_id=unidade_id,
+                canal=canal,
+                status=StatusPedido.AGUARDANDO_PAGAMENTO,
+                total_centavos=subtotal,
+                desconto_centavos=0,
+                chave_idempotencia=chave,
+                resumo_requisicao=resumo,
+                criado_em=agora(),
+            )
+            for produto_id, quantidade in quantidades.items():
+                repositorio.ajustar_estoque(unidade_id, produto_id, -quantidade)
+                repositorio.adicionar(
+                    "itens_pedido",
+                    pedido_id=pedido["id"],
+                    produto_id=produto_id,
+                    quantidade=quantidade,
+                    preco_unitario_centavos=precos[produto_id],
+                )
+                repositorio.adicionar(
+                    "movimentacoes_estoque",
+                    unidade_id=unidade_id,
+                    produto_id=produto_id,
+                    variacao=-quantidade,
+                    motivo=f"PEDIDO:{pedido['id']}",
+                    ator_id=ator.id,
+                    criado_em=agora(),
+                )
+            auditar(repositorio, ator, "PEDIDO_CRIADO", pedido["id"])
+            return self.serializar(repositorio, pedido)
+
+    def obter(self, ator, pedido_id):
+        with self.unidade_trabalho() as repositorio:
+            pedido = self.exigir_acesso(repositorio, ator, pedido_id)
+            return self.serializar(repositorio, pedido)
+
+    def listar(self, ator, pagina, limite, canal=None, status=None):
+        filtros = {}
+        if ator.perfil == Perfil.CLIENTE:
+            filtros["usuario_id"] = ator.id
+        elif ator.perfil != Perfil.ADMIN:
+            filtros["unidade_id"] = ator.unidade_id
+        if canal:
+            filtros["canal"] = canal
+        if status:
+            filtros["status"] = status
+        with self.unidade_trabalho() as repositorio:
+            resultado = paginar(repositorio, "pedidos", pagina, limite, **filtros)
+            resultado["itens"] = [
+                self.serializar(repositorio, pedido) for pedido in resultado["itens"]
+            ]
+            return resultado
+
+    def devolver_saldos(self, repositorio, ator, pedido):
+        for item in repositorio.listar("itens_pedido", pedido_id=pedido["id"]):
+            repositorio.ajustar_estoque(
+                pedido["unidade_id"], item["produto_id"], item["quantidade"]
+            )
+            repositorio.adicionar(
+                "movimentacoes_estoque",
+                unidade_id=pedido["unidade_id"],
+                produto_id=item["produto_id"],
+                variacao=item["quantidade"],
+                motivo=f"CANCELAMENTO:{pedido['id']}",
+                ator_id=ator.id,
+                criado_em=agora(),
+            )
+
+    def pagar(self, ator, pedido_id, resultado):
+        ator.exigir(Perfil.CLIENTE, Perfil.ATENDENTE, Perfil.ADMIN)
+        with self.unidade_trabalho() as repositorio:
+            pedido = self.exigir_acesso(repositorio, ator, pedido_id)
+            pagamento = repositorio.obter("pagamentos", pedido_id=pedido_id)
+            if pagamento:
+                if pagamento["status"] != resultado:
+                    raise ErroNegocio(
+                        "PAGAMENTO_FINALIZADO", "Pagamento ja finalizado com outro resultado."
+                    )
+                return {
+                    "pagamento": {**pagamento, "retorno": json.loads(pagamento["retorno"])},
+                    "pedido": self.serializar(repositorio, pedido),
+                }
+            if pedido["status"] != StatusPedido.AGUARDANDO_PAGAMENTO:
+                raise ErroNegocio("STATUS_INVALIDO", "Pedido nao aguarda pagamento.")
+            retorno = self.servico_pagamento.solicitar(
+                pedido_id, pedido["total_centavos"], resultado
+            )
+            pagamento = repositorio.adicionar(
+                "pagamentos",
+                pedido_id=pedido_id,
+                status=resultado,
+                valor_centavos=pedido["total_centavos"],
+                retorno=json.dumps(retorno),
+                criado_em=agora(),
+            )
+            status = StatusPedido.EM_PREPARO if resultado == "APROVADO" else StatusPedido.CANCELADO
+            if resultado == "RECUSADO":
+                self.devolver_saldos(repositorio, ator, pedido)
+            repositorio.atualizar("pedidos", pedido_id, status=status)
+            pedido["status"] = status
+            auditar(repositorio, ator, f"PAGAMENTO_{resultado}", pedido_id)
+            return {
+                "pagamento": {**pagamento, "retorno": retorno},
+                "pedido": self.serializar(repositorio, pedido),
+            }
+
+    def alterar_status(self, ator, pedido_id, destino):
+        with self.unidade_trabalho() as repositorio:
+            pedido = self.exigir_acesso(repositorio, ator, pedido_id)
+            if destino == StatusPedido.CANCELADO:
+                ator.exigir(Perfil.CLIENTE, Perfil.ATENDENTE, Perfil.GERENTE, Perfil.ADMIN)
+                if (
+                    ator.perfil == Perfil.CLIENTE
+                    and pedido["status"] != StatusPedido.AGUARDANDO_PAGAMENTO
+                ):
+                    raise ErroNegocio(
+                        "SEM_PERMISSAO", "Cliente pode cancelar apenas antes do pagamento.", 403
+                    )
+            elif destino == StatusPedido.PRONTO:
+                ator.exigir(Perfil.COZINHA, Perfil.GERENTE, Perfil.ADMIN)
+            elif destino == StatusPedido.ENTREGUE:
+                ator.exigir(Perfil.ATENDENTE, Perfil.GERENTE, Perfil.ADMIN)
+            else:
+                raise ErroNegocio("STATUS_INVALIDO", "Status controlado pelo fluxo de pagamento.")
+            pedido_dominio = Pedido(StatusPedido(pedido["status"]), pedido["total_centavos"])
+            pedido_dominio.alterar_status(destino)
+            if destino == StatusPedido.CANCELADO:
+                self.devolver_saldos(repositorio, ator, pedido)
+                pagamento = repositorio.obter("pagamentos", pedido_id=pedido_id)
+                if pagamento and pagamento["status"] == "APROVADO":
+                    retorno = json.loads(pagamento["retorno"])
+                    retorno["status"] = "ESTORNADO"
+                    retorno["mensagem"] = "Estorno simulado registrado."
+                    repositorio.atualizar(
+                        "pagamentos",
+                        pagamento["id"],
+                        status="ESTORNADO",
+                        retorno=json.dumps(retorno),
+                    )
+            repositorio.atualizar("pedidos", pedido_id, status=destino)
+            auditar(repositorio, ator, f"PEDIDO_{destino}", pedido_id)
+            pedido["status"] = destino
+            return self.serializar(repositorio, pedido)

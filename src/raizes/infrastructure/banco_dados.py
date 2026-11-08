@@ -72,6 +72,23 @@ class RepositorioSqlite:
         )
 
 
+    def ajustar_estoque(self, unidade_id, produto_id, variacao):
+        resultado = self.conexao.execute(
+            "UPDATE estoques SET quantidade = quantidade + ? WHERE unidade_id = ? AND produto_id = ? AND quantidade + ? >= 0",
+            (variacao, unidade_id, produto_id, variacao),
+        )
+        if resultado.rowcount != 1:
+            raise ErroNegocio("ESTOQUE_INSUFICIENTE", "Estoque insuficiente na unidade.")
+
+    def ajustar_pontos(self, usuario_id, variacao):
+        resultado = self.conexao.execute(
+            "UPDATE usuarios SET pontos = pontos + ? WHERE id = ? AND pontos + ? >= 0",
+            (variacao, usuario_id, variacao),
+        )
+        if resultado.rowcount != 1:
+            raise ErroNegocio("PONTOS_INSUFICIENTES", "Saldo de pontos insuficiente.")
+
+
 class BancoDados:
     def __init__(self, caminho: str):
         self.caminho = caminho

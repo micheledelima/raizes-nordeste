@@ -46,6 +46,22 @@ A migração define usuários, unidades, produtos, estoque, pedidos, itens, paga
 .\.venv\Scripts\python -m ruff check src testes
 ```
 
+## Catálogo e estoque
+
+Após aplicar a migração, cadastre unidades e produtos pela API com uma conta ADMIN. As rotas públicas `GET /unidades`, `GET /produtos` e `GET /unidades/{unidadeId}/cardapio` permitem a consulta do catálogo. As rotas de criação e movimentação de estoque exigem autenticação; apenas ADMIN e GERENTE podem consultar ou alterar estoque, respeitando a unidade vinculada ao usuário.
+
+Para dados locais de demonstração, defina `RAIZES_SENHA_INICIAL` no `.env` e execute:
+
+```powershell
+.\.venv\Scripts\python -m raizes.linha_comando popular
+```
+
+O comando cadastra duas unidades, dois produtos, estoque inicial e contas de exemplo sem sobrescrever registros existentes.
+## Pedidos e pagamentos
+
+Clientes, atendentes e administradores criam pedidos em `POST /pedidos` com `unidadeId`, `canalPedido` e itens. Os canais aceitos são `APP`, `TOTEM`, `BALCAO`, `PICKUP` e `WEB`. A requisição exige o cabeçalho `Idempotency-Key`; a mesma chave com o mesmo conteúdo devolve o pedido já criado. O estoque é reservado na criação.
+
+`POST /pagamentos` registra um pagamento simulado aprovado, recusado ou com tempo esgotado. Um pagamento aprovado encaminha o pedido para preparo; um pagamento recusado cancela o pedido e devolve o estoque. COZINHA marca o pedido como pronto e ATENDENTE registra a entrega.
 ## Cadastro e autenticação
 
 Configure `RAIZES_SEGREDO_JWT` em `.env` com uma chave aleatória de pelo menos 32 caracteres. O valor `segredo` do arquivo de exemplo precisa ser substituído para executar esta etapa. Uma chave pode ser gerada com:

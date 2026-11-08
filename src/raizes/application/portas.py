@@ -15,6 +15,8 @@ class Repositorio(Protocol):
 
     def atualizar(self, tabela: str, registro_id: str, **valores: Any) -> None: ...
 
+    def ajustar_estoque(self, unidade_id: str, produto_id: str, variacao: int) -> None: ...
+
 
 class UnidadeTrabalho(Protocol):
     def __call__(self) -> AbstractContextManager[Repositorio]: ...
@@ -37,3 +39,17 @@ def exigir_registro(repositorio: Repositorio, tabela: str, **filtros: Any) -> di
     if registro is None:
         raise ErroNegocio("NAO_ENCONTRADO", "Recurso nao encontrado.", 404)
     return registro
+
+def paginar(
+    repositorio: Repositorio, tabela: str, pagina: int, limite: int, **filtros: Any
+) -> dict:
+    return {
+        "itens": repositorio.listar(tabela, pagina=pagina, limite=limite, **filtros),
+        "pagina": pagina,
+        "limite": limite,
+        "total": repositorio.contar(tabela, **filtros),
+    }
+
+
+class ServicoPagamento(Protocol):
+    def solicitar(self, pedido_id: str, valor_centavos: int, resultado: str) -> dict: ...
