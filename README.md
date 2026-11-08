@@ -55,9 +55,9 @@ Os testes usam bancos temporários. Os resultados das execuções ficam em `docu
 
 ## Arquitetura
 
-`domain` contém perfis, canais e transições de pedido. `application` orquestra casos de uso e define portas. `infrastructure` implementa repositório SQLite, migrações, hash scrypt, JWT e pagamento simulado. `api` adapta HTTP e valida contratos. `montagem.py` monta as dependências. O domínio não importa framework ou banco; a aplicação depende de portas, sem SQL.
+`domain` contém perfis, canais e transições de pedido. `application` orquestra os casos de uso e define portas. `infrastructure` implementa SQLite, migrações, hash scrypt, JWT e pagamento simulado. `api` adapta HTTP e valida contratos. `montagem.py` monta as dependências.
 
-A transação de criação inclui estoque, pedido, itens, pontos e auditoria. SQLite usa WAL e transações de escrita serializadas, com espera limitada. O teste concorrente verifica que duas compras não vendem o mesmo saldo. O pagamento simulado é local e determinístico. Uma integração externa precisará de uma caixa de saída transacional, confirmação autenticada, reconciliação e novas tentativas fora da transação. Testes de carga e de alta disponibilidade estão pendentes.
+A criação do pedido acontece em uma transação: estoque, pedido, itens, pontos e auditoria são registrados juntos. SQLite usa WAL no ambiente local. O pagamento é somente simulado.
 
 ## Documentação e entrega
 
@@ -66,7 +66,7 @@ A transação de criação inclui estoque, pedido, itens, pontos e auditoria. SQ
 - [Contratos das rotas](documentacao/rotas.md)
 - [Privacidade e segurança](documentacao/privacidade.md)
 
-Repositório: https://github.com/micheledelima/raizes-nordeste. O `origin` está configurado para esse endereço. Os arquivos ainda estão apenas na pasta local, sem commits ou envio para o GitHub.
+Repositório: https://github.com/micheledelima/raizes-nordeste.
 
 Referências técnicas: [FastAPI](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/), [SQLite no Python](https://docs.python.org/3.13/library/sqlite3.html), [PyJWT](https://pyjwt.readthedocs.io/en/stable/). O escopo segue o estudo de caso da rede e o roteiro da trilha Back-End de 2026.
 
@@ -74,7 +74,7 @@ Referências técnicas: [FastAPI](https://fastapi.tiangolo.com/tutorial/security
 
 A migração `001_inicial.sql` cria o esquema em português. Com o ambiente virtual ativo, execute `python -m raizes.linha_comando migrar` antes de iniciar a API. As próximas mudanças de esquema devem entrar em novos arquivos de migração.
 
-O projeto usa nomes em português. Identificadores exigidos pelo Python e pelas bibliotecas, formatos OpenAPI/Postman e os valores de canal definidos no roteiro (`APP`, `TOTEM`, `BALCAO`, `PICKUP`, `WEB`) mantêm a grafia exigida por esses contratos.
+O projeto usa nomes em português. Identificadores exigidos pelo Python e os valores de canal definidos no roteiro (`APP`, `TOTEM`, `BALCAO`, `PICKUP`, `WEB`) mantêm a grafia exigida por esses contratos.
 
 A autenticação está em `/autenticacao/entrar`; o perfil próprio, em `/usuarios/eu`; e a verificação de saúde, em `/healthcheck`. O login devolve `tokenAcesso` e `tipoToken`. As listagens usam `pagina`, `limite`, `itens` e `total`. O erro inclui `requisicaoId`. As versões anteriores desses nomes não são mantidas como rotas alternativas.
 

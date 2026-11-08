@@ -1,39 +1,33 @@
 # Privacidade e segurança
 
-## Dados tratados
+## Dados utilizados
 
-| Dado | Finalidade | Base legal proposta | Proteção |
-| --- | --- | --- | --- |
-| Nome e e-mail | Identificação da conta e operação do pedido | Execução contratual | Consulta pelo titular e anonimização |
-| Hash de senha | Autenticação | Vinculada à operação e proteção da conta | scrypt com salt aleatório; hash não retornado pela API |
-| Pedidos e pagamentos mock | Atendimento e rastreabilidade | Execução contratual e obrigações aplicáveis | Acesso restrito ao cliente ou à equipe autorizada |
-| Consentimento de fidelidade | Acúmulo e resgate de pontos | Consentimento específico | Registro de data, finalidade, versão e revogação |
-| Auditoria | Apuração de operações sensíveis | Interesse legítimo ou obrigação aplicável | Consulta restrita a ADMIN; sem conteúdo das requisições |
+| Dado | Uso no sistema | Proteção aplicada |
+| --- | --- | --- |
+| Nome e e-mail | Cadastro e identificação da conta | Consulta apenas pelo titular; anonimização disponível |
+| Senha | Autenticação | Hash scrypt com sal aleatório |
+| Pedidos | Atendimento e histórico | Acesso pelo cliente ou equipe autorizada |
+| Consentimento | Participação na fidelidade | Registro de data, finalidade e versão |
+| Auditoria | Registro de ações importantes | Consulta restrita a ADMIN |
 
-As bases legais precisam de validação pelo controlador antes de uso em produção. Os controles descritos aqui são os implementados no protótipo e não representam uma avaliação jurídica completa.
-
-O cadastro não solicita CPF, telefone, endereço, idade ou dados de cartão. A participação na fidelidade é opcional. `PUT /usuarios/eu/consentimentos` registra cada concessão ou revogação com data em UTC, finalidade `FIDELIDADE` e versão `1.0` da política.
+O sistema não solicita CPF, telefone, endereço ou dados de cartão.
 
 ## Autenticação e acesso
 
-As senhas usam scrypt com N=16384, r=8, p=1 e salt aleatório de 16 bytes. O JWT usa HS256, chave externa com pelo menos 32 caracteres e duração padrão de 30 minutos. A validação confere assinatura, expiração, emissor e destinatário.
+As senhas não são retornadas pela API. O JWT usa chave configurada no ambiente e expira conforme `RAIZES_DURACAO_TOKEN_MINUTOS`. A cada requisição autenticada, a aplicação confere se a conta está ativa.
 
-A aplicação verifica o usuário a cada requisição. Contas desativadas deixam de ter acesso mesmo com token ainda dentro da validade. Também são conferidos perfil, propriedade do pedido e unidade do funcionário. Refresh token, logout com revogação e lista de tokens bloqueados ainda não foram implementados.
+As permissões consideram o perfil, o dono do pedido e a unidade do funcionário. Um gerente não acessa estoque ou pedidos de outra unidade.
+
+## Consentimento e anonimização
+
+O consentimento de fidelidade pode ser alterado em `PUT /usuarios/eu/consentimentos`. Sem consentimento, não há crédito nem resgate de pontos.
+
+`DELETE /usuarios/eu` substitui nome e e-mail, invalida a senha, desativa a conta e remove o saldo de pontos. Pedidos e registros técnicos permanecem para manter a integridade do histórico.
 
 ## Auditoria
 
-São registrados cadastro, login bem-sucedido, consulta de dados pessoais, consentimento, anonimização, estoque, criação de pedido, pagamento e mudança de status. A consulta à auditoria exige ADMIN e também gera registro.
+São registrados cadastro, login, alteração de consentimento, anonimização, estoque, pedido, pagamento e mudança de status. Os registros guardam ator, ação, recurso e data. Senhas, tokens e corpo das requisições não são registrados.
 
-Os registros guardam identificador do ator, ação, recurso e data. Senhas, tokens, e-mails e corpos de requisição não entram nos logs técnicos.
+## Limites atuais
 
-## Anonimização e retenção
-
-`DELETE /usuarios/eu` substitui nome e e-mail, inutiliza a senha, desativa a conta e zera os pontos. A operação é bloqueada enquanto houver pedido em aberto.
-
-Identificadores técnicos e transações permanecem para preservar o histórico e as relações do banco. Dados contextuais ainda podem permitir reidentificação; a substituição dos campos não garante anonimato absoluto.
-
-Não há expurgo automático. A proposta é revisar a necessidade dos logs após 180 dias e definir prazos para contas inativas, transações e backups conforme a política do controlador e as obrigações aplicáveis.
-
-## Antes de publicar em produção
-
-Configurar HTTPS, limitação de tentativas de login, gestão de segredos, backups cifrados, monitoramento e atendimento aos titulares. As contas demonstrativas do seed são destinadas ao ambiente local.
+O projeto é acadêmico e usa banco local. HTTPS, limitação de tentativas, backups e política de retenção precisam ser definidos antes de uso fora desse ambiente.
