@@ -20,3 +20,28 @@ Copy-Item .env.example .env
 ```
 
 Configure as variáveis em `.env` e mantenha esse arquivo fora do versionamento.
+
+## Banco de dados
+
+O projeto usa SQLite, incluído no Python. Configure o caminho do banco em `.env`:
+
+```dotenv
+RAIZES_BANCO_DADOS=dados/raizes.db
+```
+
+Aplique a migração inicial:
+
+```powershell
+.\.venv\Scripts\python -m raizes.linha_comando migrar
+```
+
+O comando cria a pasta, o banco e o esquema. Repetir o comando preserva os registros e não reaplica migrações já registradas.
+
+A migração define usuários, unidades, produtos, estoque, pedidos, itens, pagamentos, movimentações, fidelidade, consentimentos e auditoria. Inclui chaves estrangeiras, índices e restrições de integridade. O repositório permite consultas e gravações dentro de transações, com confirmação ao concluir e rollback em caso de erro.
+
+## Testes
+
+```powershell
+.\.venv\Scripts\python -m pytest -q
+.\.venv\Scripts\python -m ruff check src testes
+```

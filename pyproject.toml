@@ -12,9 +12,19 @@ dependencies = ["fastapi==0.162.2", "uvicorn==0.54.0", "python-dotenv==1.2.4"]
 [project.optional-dependencies]
 desenvolvimento = ["pytest==9.2.0", "httpx==0.28.1", "ruff==0.17.4"]
 
+[project.scripts]
+raizes = "raizes.linha_comando:principal"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
+
+[tool.setuptools.package-data]
+raizes = ["infrastructure/migracoes/*.sql"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["testes"]
 
 [tool.ruff]
 line-length = 100
