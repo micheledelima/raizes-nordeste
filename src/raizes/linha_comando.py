@@ -15,7 +15,7 @@ def principal():
     banco = BancoDados(configuracoes.banco)
     if argumentos.comando == "migrar":
         banco.migrar()
-        print("MigraÃ§Ãµes aplicadas.")
+        print("Migrações aplicadas.")
     else:
         popular(
             banco,

@@ -17,6 +17,8 @@ class Repositorio(Protocol):
 
     def ajustar_estoque(self, unidade_id: str, produto_id: str, variacao: int) -> None: ...
 
+    def ajustar_pontos(self, usuario_id: str, variacao: int) -> None: ...
+
 
 class UnidadeTrabalho(Protocol):
     def __call__(self) -> AbstractContextManager[Repositorio]: ...
@@ -32,6 +34,10 @@ class Seguranca(Protocol):
     def ler_token(self, token: str) -> str: ...
 
 
+class ServicoPagamento(Protocol):
+    def solicitar(self, pedido_id: str, valor_centavos: int, resultado: str) -> dict: ...
+
+
 def exigir_registro(repositorio: Repositorio, tabela: str, **filtros: Any) -> dict:
     from raizes.domain.modelos import ErroNegocio
 
@@ -39,6 +45,7 @@ def exigir_registro(repositorio: Repositorio, tabela: str, **filtros: Any) -> di
     if registro is None:
         raise ErroNegocio("NAO_ENCONTRADO", "Recurso nao encontrado.", 404)
     return registro
+
 
 def paginar(
     repositorio: Repositorio, tabela: str, pagina: int, limite: int, **filtros: Any
@@ -49,7 +56,3 @@ def paginar(
         "limite": limite,
         "total": repositorio.contar(tabela, **filtros),
     }
-
-
-class ServicoPagamento(Protocol):
-    def solicitar(self, pedido_id: str, valor_centavos: int, resultado: str) -> dict: ...

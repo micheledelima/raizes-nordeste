@@ -1,0 +1,149 @@
+{
+  "metodo": "Requisicoes equivalentes a colecao executadas via TestClient, banco temporario; scripts JavaScript do Postman nao executados neste runner.",
+  "cenarios": [
+    {
+      "teste": "T01 Autenticar cliente",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T02 Autenticar cozinha",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T03 Autenticar atendente",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T04 Autenticar admin",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T05 Autenticar gerente",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T06 Cardapio por unidade",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T07 Criar pedido multicanal",
+      "esperado": 201,
+      "obtido": 201,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T08 Consultar pedido",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T09 Filtrar canal",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T10 Aprovar pagamento mock",
+      "esperado": 201,
+      "obtido": 201,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T11 Cozinha marca pronto",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T12 Atendente entrega",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T13 Consultar saldo e historico",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T14 Criar segundo pedido",
+      "esperado": 201,
+      "obtido": 201,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T15 Recusar pagamento",
+      "esperado": 201,
+      "obtido": 201,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T16 Consultar acoes sensiveis",
+      "esperado": 200,
+      "obtido": 200,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T17 Acesso sem token",
+      "esperado": 401,
+      "obtido": 401,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T18 Perfil sem permissao",
+      "esperado": 403,
+      "obtido": 403,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T19 Canal obrigatorio ausente",
+      "esperado": 422,
+      "obtido": 422,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T20 Quantidade invalida",
+      "esperado": 422,
+      "obtido": 422,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T21 Produto inexistente",
+      "esperado": 404,
+      "obtido": 404,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T22 Estoque insuficiente",
+      "esperado": 409,
+      "obtido": 409,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T23 Unidade nao autorizada",
+      "esperado": 403,
+      "obtido": 403,
+      "resultado": "PASSOU"
+    },
+    {
+      "teste": "T24 Autenticar invalido",
+      "esperado": 401,
+      "obtido": 401,
+      "resultado": "PASSOU"
+    }
+  ]
+}

@@ -2,13 +2,14 @@ import logging
 from collections.abc import Callable
 from uuid import UUID, uuid4
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.exceptions import HTTPException
 
 from raizes.api.contratos import (
+    AlteracaoConsentimento,
     AlteracaoStatus,
     CadastroProduto,
     CadastroUnidade,
@@ -23,6 +24,7 @@ from raizes.api.contratos import (
     RespostaToken,
     SolicitacaoPagamento,
 )
+from raizes.api.documentacao import complementar_openapi
 from raizes.application.servicos import Catalogo, Contas, GestaoPedidos
 from raizes.domain.modelos import Ator, CanalPedido, ErroNegocio, StatusPedido
 
@@ -44,7 +46,7 @@ def criar_api(contas: Contas, catalogo: Catalogo, gestao_pedidos: GestaoPedidos)
     api = FastAPI(
         title="Raízes do Nordeste",
         version="0.1.0",
-        description="Cadastro e autenticação de usuários.",
+        description="API multicanal. Valores monetarios em centavos. Pagamentos exclusivamente simulados.",
         responses=erros,
     )
     autenticacao_bearer = HTTPBearer(auto_error=False)
@@ -129,6 +131,21 @@ def criar_api(contas: Contas, catalogo: Catalogo, gestao_pedidos: GestaoPedidos)
     def consultar_perfil(ator: Ator = Depends(ator_autenticado)):
         return contas.consultar_perfil(ator)
 
+    @api.delete(
+        "/usuarios/eu", status_code=204, tags=["Usuarios"], summary="Anonimizar a propria conta"
+    )
+    def anonimizar(ator: Ator = Depends(ator_autenticado)):
+        contas.anonimizar(ator)
+        return Response(status_code=204)
+
+    @api.put(
+        "/usuarios/eu/consentimentos",
+        tags=["Usuarios"],
+        summary="Conceder ou revogar consentimento de fidelidade",
+    )
+    def consentimento(corpo: AlteracaoConsentimento, ator: Ator = Depends(ator_autenticado)):
+        return contas.consentimento(ator, corpo.concedido)
+
     @api.get(
         "/unidades", response_model=Pagina, tags=["Unidades"], summary="Listar unidades ativas"
     )
@@ -195,7 +212,6 @@ def criar_api(contas: Contas, catalogo: Catalogo, gestao_pedidos: GestaoPedidos)
             ator, str(corpo.unidadeId), str(corpo.produtoId), corpo.quantidade, corpo.motivo
         )
 
-
     @api.post(
         "/pedidos",
         status_code=201,
@@ -219,6 +235,7 @@ def criar_api(contas: Contas, catalogo: Catalogo, gestao_pedidos: GestaoPedidos)
             corpo.canalPedido,
             itens,
             chave_idempotencia,
+            corpo.pontosResgate,
         )
 
     @api.get(
@@ -268,5 +285,27 @@ def criar_api(contas: Contas, catalogo: Catalogo, gestao_pedidos: GestaoPedidos)
     def pagar(corpo: SolicitacaoPagamento, ator: Ator = Depends(ator_autenticado)):
         return gestao_pedidos.pagar(ator, str(corpo.pedidoId), corpo.resultado)
 
+    @api.get(
+        "/fidelidade", tags=["Fidelidade"], summary="Consultar saldo e historico do proprio usuario"
+    )
+    def consultar_fidelidade(
+        pagina: int = Query(1, ge=1),
+        limite: int = Query(10, ge=1, le=100),
+        ator: Ator = Depends(ator_autenticado),
+    ):
+        return gestao_pedidos.consultar_fidelidade(ator, pagina, limite)
 
-    return api
+    @api.get(
+        "/auditorias",
+        response_model=Pagina,
+        tags=["Auditoria"],
+        summary="Consultar auditoria como administrador",
+    )
+    def consultar_auditorias(
+        pagina: int = Query(1, ge=1),
+        limite: int = Query(10, ge=1, le=100),
+        ator: Ator = Depends(ator_autenticado),
+    ):
+        return gestao_pedidos.consultar_auditorias(ator, pagina, limite)
+
+    return complementar_openapi(api)

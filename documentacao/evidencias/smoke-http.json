@@ -1,0 +1,10 @@
+{
+  "servidor": "uvicorn TCP local",
+  "saude": 200,
+  "documentacaoSwagger": 200,
+  "contratoOpenAPI": 200,
+  "autenticacao": 200,
+  "pedidosAutenticados": 200,
+  "paginacaoPortugues": true,
+  "correlacaoErro": true
+}

@@ -95,6 +95,52 @@ class Contas:
                 "consentimentoFidelidade": bool(usuario["consentimento"]),
             }
 
+    def consentimento(self, ator, concedido):
+        with self.unidade_trabalho() as repositorio:
+            repositorio.atualizar("usuarios", ator.id, consentimento=int(concedido))
+            repositorio.adicionar(
+                "consentimentos",
+                usuario_id=ator.id,
+                concedido=int(concedido),
+                finalidade="FIDELIDADE",
+                versao_politica="1.0",
+                criado_em=agora(),
+            )
+            auditar(repositorio, ator, "CONSENTIMENTO_ATUALIZADO", ator.id)
+        return {"consentimentoFidelidade": concedido, "versaoPolitica": "1.0"}
+
+    def anonimizar(self, ator):
+        with self.unidade_trabalho() as repositorio:
+            for status in [
+                StatusPedido.AGUARDANDO_PAGAMENTO,
+                StatusPedido.EM_PREPARO,
+                StatusPedido.PRONTO,
+            ]:
+                if repositorio.obter("pedidos", usuario_id=ator.id, status=status):
+                    raise ErroNegocio(
+                        "PEDIDO_EM_ABERTO", "Conclua ou cancele seus pedidos antes de anonimizar."
+                    )
+            repositorio.atualizar(
+                "usuarios",
+                ator.id,
+                nome="Anonimizado",
+                email=f"{ator.id}@anon.invalid",
+                senha_hash="revogada",
+                ativo=0,
+                consentimento=0,
+                pontos=0,
+            )
+            repositorio.adicionar(
+                "consentimentos",
+                usuario_id=ator.id,
+                concedido=0,
+                finalidade="FIDELIDADE",
+                versao_politica="1.0",
+                criado_em=agora(),
+            )
+            auditar(repositorio, ator, "ANONIMIZACAO", ator.id)
+
+
 class Catalogo:
     def __init__(self, unidade_trabalho: UnidadeTrabalho):
         self.unidade_trabalho = unidade_trabalho
@@ -190,11 +236,12 @@ class GestaoPedidos:
             "status": pedido["status"],
             "totalCentavos": pedido["total_centavos"],
             "descontoCentavos": pedido["desconto_centavos"],
+            "pontosResgatados": pedido["pontos_resgatados"],
             "criadoEm": pedido["criado_em"],
             "itens": repositorio.listar("itens_pedido", pedido_id=pedido["id"]),
         }
 
-    def criar(self, ator, unidade_id, canal, itens, chave):
+    def criar(self, ator, unidade_id, canal, itens, chave, pontos=0):
         ator.exigir(Perfil.CLIENTE, Perfil.ATENDENTE, Perfil.ADMIN)
         if ator.perfil != Perfil.CLIENTE:
             ator.verificar_unidade(unidade_id)
@@ -205,6 +252,7 @@ class GestaoPedidos:
             "unit": unidade_id,
             "canal": canal,
             "itens": sorted(quantidades.items()),
+            "pontos": pontos,
         }
         resumo = hashlib.sha256(json.dumps(conteudo_canonico, sort_keys=True).encode()).hexdigest()
         with self.unidade_trabalho() as repositorio:
@@ -231,14 +279,27 @@ class GestaoPedidos:
             subtotal = sum(
                 (precos[produto_id] * quantidade for produto_id, quantidade in quantidades.items())
             )
+            usuario = exigir_registro(repositorio, "usuarios", id=ator.id)
+            if pontos:
+                if not usuario["consentimento"]:
+                    raise ErroNegocio(
+                        "CONSENTIMENTO_NECESSARIO",
+                        "Autorize a participacao no programa de fidelidade.",
+                    )
+                if pontos > subtotal // 2:
+                    raise ErroNegocio(
+                        "RESGATE_EXCEDIDO", "Desconto de fidelidade limitado a 50% do pedido."
+                    )
+                repositorio.ajustar_pontos(ator.id, -pontos)
             pedido = repositorio.adicionar(
                 "pedidos",
                 usuario_id=ator.id,
                 unidade_id=unidade_id,
                 canal=canal,
                 status=StatusPedido.AGUARDANDO_PAGAMENTO,
-                total_centavos=subtotal,
-                desconto_centavos=0,
+                total_centavos=subtotal - pontos,
+                desconto_centavos=pontos,
+                pontos_resgatados=pontos,
                 chave_idempotencia=chave,
                 resumo_requisicao=resumo,
                 criado_em=agora(),
@@ -259,6 +320,15 @@ class GestaoPedidos:
                     variacao=-quantidade,
                     motivo=f"PEDIDO:{pedido['id']}",
                     ator_id=ator.id,
+                    criado_em=agora(),
+                )
+            if pontos:
+                repositorio.adicionar(
+                    "eventos_fidelidade",
+                    usuario_id=ator.id,
+                    pedido_id=pedido["id"],
+                    variacao=-pontos,
+                    tipo="RESGATE",
                     criado_em=agora(),
                 )
             auditar(repositorio, ator, "PEDIDO_CRIADO", pedido["id"])
@@ -298,6 +368,16 @@ class GestaoPedidos:
                 variacao=item["quantidade"],
                 motivo=f"CANCELAMENTO:{pedido['id']}",
                 ator_id=ator.id,
+                criado_em=agora(),
+            )
+        if pedido["pontos_resgatados"]:
+            repositorio.ajustar_pontos(pedido["usuario_id"], pedido["pontos_resgatados"])
+            repositorio.adicionar(
+                "eventos_fidelidade",
+                usuario_id=pedido["usuario_id"],
+                pedido_id=pedido["id"],
+                variacao=pedido["pontos_resgatados"],
+                tipo="ESTORNO",
                 criado_em=agora(),
             )
 
@@ -372,7 +452,37 @@ class GestaoPedidos:
                         status="ESTORNADO",
                         retorno=json.dumps(retorno),
                     )
+            if destino == StatusPedido.ENTREGUE:
+                usuario = exigir_registro(repositorio, "usuarios", id=pedido["usuario_id"])
+                if usuario["consentimento"] and pedido_dominio.pontos_fidelidade:
+                    repositorio.ajustar_pontos(usuario["id"], pedido_dominio.pontos_fidelidade)
+                    repositorio.adicionar(
+                        "eventos_fidelidade",
+                        usuario_id=usuario["id"],
+                        pedido_id=pedido_id,
+                        variacao=pedido_dominio.pontos_fidelidade,
+                        tipo="CREDITO",
+                        criado_em=agora(),
+                    )
             repositorio.atualizar("pedidos", pedido_id, status=destino)
             auditar(repositorio, ator, f"PEDIDO_{destino}", pedido_id)
             pedido["status"] = destino
             return self.serializar(repositorio, pedido)
+
+    def consultar_fidelidade(self, ator, pagina, limite):
+        with self.unidade_trabalho() as repositorio:
+            usuario = exigir_registro(repositorio, "usuarios", id=ator.id)
+            auditar(repositorio, ator, "CONSULTA_FIDELIDADE", ator.id)
+            return {
+                "saldo": usuario["pontos"],
+                "consentimento": bool(usuario["consentimento"]),
+                "historico": paginar(
+                    repositorio, "eventos_fidelidade", pagina, limite, usuario_id=ator.id
+                ),
+            }
+
+    def consultar_auditorias(self, ator, pagina, limite):
+        ator.exigir(Perfil.ADMIN)
+        with self.unidade_trabalho() as repositorio:
+            auditar(repositorio, ator, "CONSULTA_AUDITORIA", ator.id)
+            return paginar(repositorio, "registros_auditoria", pagina, limite)

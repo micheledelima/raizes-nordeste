@@ -6,7 +6,7 @@ class PagamentoSimulado:
         if resultado == "TEMPO_ESGOTADO":
             raise ErroNegocio(
                 "PAGAMENTO_INDISPONIVEL",
-                "ServiÃ§o de pagamento simulado indisponÃ­vel; repita a solicitacao.",
+                "Serviço de pagamento simulado indisponível; repita a solicitacao.",
                 503,
             )
         return {

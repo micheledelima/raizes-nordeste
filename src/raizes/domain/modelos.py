@@ -33,6 +33,7 @@ class StatusPedido(StrEnum):
     ENTREGUE = "ENTREGUE"
     CANCELADO = "CANCELADO"
 
+
 @dataclass(frozen=True)
 class Ator:
     id: str
@@ -47,6 +48,7 @@ class Ator:
         if self.perfil != Perfil.ADMIN and self.unidade_id != unidade_id:
             raise ErroNegocio("SEM_PERMISSAO", "Usuario sem acesso a esta unidade.", 403)
 
+
 @dataclass(frozen=True)
 class Pedido:
     status: StatusPedido
@@ -60,3 +62,7 @@ class Pedido:
         }
         if destino not in permitidas.get(self.status, set()):
             raise ErroNegocio("STATUS_INVALIDO", "Transicao de status nao permitida.")
+
+    @property
+    def pontos_fidelidade(self) -> int:
+        return self.total_centavos // 100

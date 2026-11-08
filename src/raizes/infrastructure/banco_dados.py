@@ -71,7 +71,6 @@ class RepositorioSqlite:
             f"UPDATE {tabela} SET {atribuicoes} WHERE id = ?", (*valores.values(), registro_id)
         )
 
-
     def ajustar_estoque(self, unidade_id, produto_id, variacao):
         resultado = self.conexao.execute(
             "UPDATE estoques SET quantidade = quantidade + ? WHERE unidade_id = ? AND produto_id = ? AND quantidade + ? >= 0",

@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from raizes.domain.modelos import CanalPedido, StatusPedido
+
 
 class Contrato(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -58,6 +60,7 @@ class MovimentacaoEstoque(Contrato):
             raise ValueError("Quantidade deve ser diferente de zero.")
         return valor
 
+
 class ItemPedido(Contrato):
     produtoId: UUID
     quantidade: int = Field(gt=0, le=1000, strict=True)
@@ -65,12 +68,13 @@ class ItemPedido(Contrato):
 
 class CriacaoPedido(Contrato):
     unidadeId: UUID
-    canalPedido: str = Field(pattern="^(APP|TOTEM|BALCAO|PICKUP|WEB)$")
+    canalPedido: CanalPedido
     itens: list[ItemPedido] = Field(min_length=1, max_length=100)
+    pontosResgate: int = Field(ge=0, le=100000000, strict=True, default=0)
 
 
 class AlteracaoStatus(Contrato):
-    status: str = Field(pattern="^(PRONTO|ENTREGUE|CANCELADO)$")
+    status: StatusPedido
 
 
 class ResultadoPagamento(StrEnum):
@@ -83,6 +87,11 @@ class SolicitacaoPagamento(Contrato):
     pedidoId: UUID
     resultado: ResultadoPagamento = ResultadoPagamento.APROVADO
 
+
+class AlteracaoConsentimento(Contrato):
+    concedido: bool
+
+
 class DetalheErro(BaseModel):
     codigo: str
     mensagem: str
@@ -93,6 +102,19 @@ class RespostaErro(BaseModel):
     erro: DetalheErro
 
 
+class RespostaPedido(BaseModel):
+    id: UUID
+    clienteId: UUID
+    unidadeId: UUID
+    canalPedido: CanalPedido
+    status: StatusPedido
+    totalCentavos: int
+    descontoCentavos: int
+    pontosResgatados: int
+    criadoEm: str
+    itens: list[dict]
+
+
 class Pagina(BaseModel):
     itens: list[dict]
     pagina: int
@@ -100,22 +122,11 @@ class Pagina(BaseModel):
     total: int
 
 
-class RespostaPedido(BaseModel):
-    id: UUID
-    clienteId: UUID
-    unidadeId: UUID
-    canalPedido: str
-    status: str
-    totalCentavos: int
-    descontoCentavos: int
-    criadoEm: str
-    itens: list[dict]
+class RespostaToken(BaseModel):
+    tokenAcesso: str
+    tipoToken: str
 
 
 class RespostaPagamento(BaseModel):
     pagamento: dict
     pedido: RespostaPedido
-
-class RespostaToken(BaseModel):
-    tokenAcesso: str
-    tipoToken: str
